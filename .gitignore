@@ -1,0 +1,20 @@
+# Local environment
+.env
+.env.local
+.env.*.local
+
+# Vercel/hosting
+.vercel
+.vercelignore
+
+# Node/Vite build artifacts
+node_modules
+dist
+.npm
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS/editor noise
+.DS_Store

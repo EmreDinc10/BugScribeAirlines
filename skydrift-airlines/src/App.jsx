@@ -11,6 +11,7 @@ const FLIGHTS = [
 export default function App() {
   const [step, setStep] = useState('search'); // search, results, details, payment, crash
   const [loading, setLoading] = useState(false);
+  const [cardNumberError, setCardNumberError] = useState('');
   
   // Form State (This is the data we want to lose to prove a point)
   const [formData, setFormData] = useState({
@@ -53,6 +54,21 @@ export default function App() {
   // --- THE BUGGY FUNCTION ---
   const handleFinalBooking = (e) => {
     e.preventDefault();
+    
+    // Validate card number - must have exactly 16 digits
+    const cardNumberDigits = formData.cardNumber.replace(/\s/g, ''); // Remove spaces
+    const expectedDigits = 16;
+    
+    if (cardNumberDigits.length !== expectedDigits) {
+      const errorMessage = `Card number must contain exactly ${expectedDigits} digits. You entered ${cardNumberDigits.length} digit(s).`;
+      setCardNumberError(errorMessage);
+      console.error('[SkyDrift] Card Number Validation Error:', errorMessage);
+      console.error(`[SkyDrift] Expected: ${expectedDigits} digits, Received: ${cardNumberDigits.length} digits`);
+      return; // Prevent form submission
+    }
+    
+    // Clear any previous errors
+    setCardNumberError('');
     setLoading(true);
 
     console.log('[SkyDrift] Initiating transaction...');
@@ -92,6 +108,7 @@ export default function App() {
       expiry: '',
       cvv: ''
     });
+    setCardNumberError('');
     setStep('search');
     console.clear();
   };
@@ -320,9 +337,22 @@ export default function App() {
                       required
                       type="text" 
                       placeholder="0000 0000 0000 0000"
-                      className="w-full pl-10 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500"
+                      value={formData.cardNumber}
+                      onChange={e => {
+                        setFormData({...formData, cardNumber: e.target.value});
+                        setCardNumberError(''); // Clear error when user types
+                      }}
+                      className={`w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-sky-500 ${
+                        cardNumberError ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
+                      }`}
                     />
                   </div>
+                  {cardNumberError && (
+                    <p className="text-red-600 text-sm mt-1 flex items-center">
+                      <AlertTriangle className="h-4 w-4 mr-1" />
+                      {cardNumberError}
+                    </p>
+                  )}
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4">

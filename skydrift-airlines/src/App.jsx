@@ -52,17 +52,15 @@ export default function App() {
 
   const capShots = (arr) => (arr.length > 3 ? arr.slice(arr.length - 3) : arr);
 
-  const captureScreenshot = async () => {
+  const captureScreenshot = async ({ download = false } = {}) => {
     try {
       const canvas = await html2canvas(document.body, { logging: false, useCORS: true, scale: 1 });
       const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-      let next = [];
-      setScreenshots((prev) => {
-        const arr = capShots([...prev, { dataUrl, capturedAt: Date.now() }]);
-        next = arr;
-        return arr;
-      });
-      return next;
+      const shot = { dataUrl, capturedAt: Date.now() };
+      const nextList = capShots([...screenshots, shot]);
+      setScreenshots(nextList);
+      if (download) downloadLatestScreenshot(nextList);
+      return nextList;
     } catch (err) {
       console.warn('Screenshot failed', err);
       return screenshots;
@@ -248,16 +246,15 @@ export default function App() {
 
     const history = chatMessages.slice(-8).map((m) => ({ role: m.role, content: m.content }));
 
-    captureScreenshot()
-      .then((shotList) => {
-        downloadLatestScreenshot(shotList);
-        return generateAssistantChat({
+    captureScreenshot({ download: true })
+      .then((shotList) =>
+        generateAssistantChat({
           userMessage: message,
           context: [buildContextSummary(), buildDiagnostics()].join('\n'),
           history,
           images: shotList
-        });
-      })
+        })
+      )
       .then((reply) => addChatMessage('assistant', reply || 'Got it.'))
       .catch((err) => {
         const friendly = err?.message || 'Assistant unavailable.';

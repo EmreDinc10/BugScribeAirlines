@@ -54,21 +54,11 @@ export default function App() {
 
   const captureScreenshot = async ({ download = false } = {}) => {
     try {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const canvas = await html2canvas(document.body, {
-        logging: false,
-        useCORS: true,
-        scale: dpr,
-        backgroundColor: '#ffffff'
-      });
+      const canvas = await html2canvas(document.body, { logging: false, useCORS: true, scale: 1 });
       const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
       const shot = { dataUrl, capturedAt: Date.now() };
-      let nextList = [];
-      setScreenshots((prev) => {
-        const arr = capShots([...prev, shot]);
-        nextList = arr;
-        return arr;
-      });
+      const nextList = capShots([...screenshots, shot]);
+      setScreenshots(nextList);
       if (download) downloadLatestScreenshot(nextList);
       return nextList;
     } catch (err) {

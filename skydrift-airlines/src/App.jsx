@@ -183,7 +183,9 @@ export default function App() {
       `Date: ${formData.date || 'not chosen'}`,
       `Passenger: ${formData.firstName || 'N/A'} ${formData.lastName || ''}`.trim(),
       `Card error: ${cardNumberError || 'none'}`,
-      `Screenshots: ${screenshots.length} (last is most recent; use it for visual state)`
+      screenshots.length
+        ? `Screenshots: ${screenshots.length} (last is most recent; use it for visual state)`
+        : 'Screenshots: none available'
     ];
     if (step === 'crash') {
       basics.push('UI crashed after payment simulation. Try reset and retry.');

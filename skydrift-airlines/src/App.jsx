@@ -83,7 +83,9 @@ export default function App() {
       if (!nextList.length) {
         nextList = capShots([...screenshots, shot]);
       }
-      if (download) downloadLatestScreenshot(nextList);
+    if (download && typeof window !== 'undefined' && window.navigator?.userAgent) {
+      // download functionality removed per request
+    }
       return nextList;
     } catch (err) {
       console.warn('Screenshot failed', err);
@@ -91,17 +93,6 @@ export default function App() {
     }
   };
 
-  const downloadLatestScreenshot = (shotList) => {
-    const latest = shotList?.[shotList.length - 1];
-    if (!latest?.dataUrl) return;
-    const a = document.createElement('a');
-    a.href = latest.dataUrl;
-    a.download = `bugscribe-shot-${latest.capturedAt || Date.now()}.png`;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
 
   // Capture console and network logs (lightweight, capped)
   useEffect(() => {

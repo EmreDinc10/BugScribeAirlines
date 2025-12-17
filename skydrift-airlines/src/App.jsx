@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Plane, Calendar, CreditCard, User, AlertTriangle, ChevronRight, Search, MapPin } from 'lucide-react';
 import { generateAssistantChat, generateIssueDraft } from './llm';
 import html2canvas from 'html2canvas';
@@ -13,6 +13,7 @@ const FLIGHTS = [
 const STORAGE_KEY = 'bugscribe_session';
 
 export default function App() {
+  const appRef = useRef(null);
   const [step, setStep] = useState('search'); // search, results, details, payment, crash
   const [loading, setLoading] = useState(false);
   const [cardNumberError, setCardNumberError] = useState('');
@@ -57,8 +58,15 @@ export default function App() {
 
   const captureScreenshot = async ({ download = false } = {}) => {
     try {
-      const dpr = Math.min(window.devicePixelRatio || 1.5, 3);
-      const canvas = await html2canvas(document.body, {
+      const target = appRef.current || document.body;
+      // Wait for fonts/layout to settle
+      if (document.fonts?.ready) {
+        await document.fonts.ready.catch(() => {});
+      }
+      await new Promise((r) => setTimeout(r, 120));
+
+      const dpr = Math.min(window.devicePixelRatio || 1.5, 3.2);
+      const canvas = await html2canvas(target, {
         logging: false,
         useCORS: true,
         backgroundColor: '#ffffff',
@@ -486,7 +494,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 font-sans text-gray-800 pb-20">
+    <div ref={appRef} className="min-h-screen bg-gray-50 font-sans text-gray-800 pb-20">
       <Header />
       <ProgressBar />
 

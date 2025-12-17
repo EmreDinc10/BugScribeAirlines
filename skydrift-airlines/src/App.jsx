@@ -572,6 +572,12 @@ export default function App() {
             <textarea
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleChatSend(e);
+                }
+              }}
               rows={3}
               placeholder="Describe what you need help with…"
               className="w-full bg-slate-900 border border-slate-800 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-600"

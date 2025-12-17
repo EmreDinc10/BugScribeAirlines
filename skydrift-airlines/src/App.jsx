@@ -10,6 +10,8 @@ const FLIGHTS = [
   { id: 3, airline: 'SkyDrift', time: '08:00 PM - 10:30 PM', duration: '2h 30m', price: 95, route: 'IST -> LHR' },
 ];
 
+const STORAGE_KEY = 'bugscribe_session';
+
 export default function App() {
   const [step, setStep] = useState('search'); // search, results, details, payment, crash
   const [loading, setLoading] = useState(false);
@@ -24,6 +26,7 @@ export default function App() {
   const [screenshots, setScreenshots] = useState([]);
   const [consoleLogs, setConsoleLogs] = useState([]);
   const [networkLogs, setNetworkLogs] = useState([]);
+  const [selectedFlightId, setSelectedFlightId] = useState(null);
   const [chatMessages, setChatMessages] = useState([
     {
       role: 'assistant',
@@ -227,6 +230,58 @@ export default function App() {
     ].join(' \n');
   };
 
+  // --- Persistence helpers ---
+  const loadSnapshot = () => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  };
+
+  const saveSnapshot = (partial = {}) => {
+    try {
+      const current = loadSnapshot() || {};
+      const next = {
+        ...current,
+        step,
+        formData,
+        selectedFlightId,
+        ...partial
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    } catch (err) {
+      console.warn('Save snapshot failed', err);
+    }
+  };
+
+  useEffect(() => {
+    const saved = loadSnapshot();
+    if (saved) {
+      if (saved.formData) setFormData(saved.formData);
+      if (saved.step) setStep(saved.step);
+      if (saved.selectedFlightId) setSelectedFlightId(saved.selectedFlightId);
+    }
+  }, []);
+
+  useEffect(() => {
+    saveSnapshot();
+  }, [formData, step, selectedFlightId]);
+
+  const handleRestore = () => {
+    const saved = loadSnapshot();
+    if (!saved) {
+      addChatMessage('assistant', 'No saved progress found.');
+      return;
+    }
+    if (saved.formData) setFormData(saved.formData);
+    if (saved.selectedFlightId) setSelectedFlightId(saved.selectedFlightId);
+    if (saved.step) setStep(saved.step);
+    addChatMessage('assistant', 'Restored your saved progress.');
+  };
+
   const openGitHubIssue = (draft) => {
     if (!draft?.title || !draft?.body) return;
     const url = `https://github.com/EmreDinc10/BugScribeAirlines/issues/new?title=${encodeURIComponent(
@@ -304,6 +359,7 @@ export default function App() {
 
   const selectFlight = (flight) => {
     console.log(`[SkyDrift] Flight selected: ID ${flight.id}`);
+    setSelectedFlightId(flight.id);
     setStep('details');
   };
 
@@ -760,6 +816,15 @@ export default function App() {
                 className="bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
               >
                 {reportBusy ? 'Preparing…' : 'Report bug'}
+              </button>
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleRestore}
+                className="text-xs text-sky-300 hover:text-white underline"
+              >
+                Restore my progress
               </button>
             </div>
             {(chatError || reportError) && (

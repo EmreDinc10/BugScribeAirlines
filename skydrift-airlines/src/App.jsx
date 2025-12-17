@@ -69,6 +69,18 @@ export default function App() {
     }
   };
 
+  const downloadLatestScreenshot = (shotList) => {
+    const latest = shotList?.[shotList.length - 1];
+    if (!latest?.dataUrl) return;
+    const a = document.createElement('a');
+    a.href = latest.dataUrl;
+    a.download = `bugscribe-shot-${latest.capturedAt || Date.now()}.jpg`;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   // Capture console and network logs (lightweight, capped)
   useEffect(() => {
     const cap = (arr) => (arr.length > 30 ? arr.slice(arr.length - 30) : arr);
@@ -237,14 +249,15 @@ export default function App() {
     const history = chatMessages.slice(-8).map((m) => ({ role: m.role, content: m.content }));
 
     captureScreenshot()
-      .then((shotList) =>
-        generateAssistantChat({
+      .then((shotList) => {
+        downloadLatestScreenshot(shotList);
+        return generateAssistantChat({
           userMessage: message,
           context: [buildContextSummary(), buildDiagnostics()].join('\n'),
           history,
           images: shotList
-        })
-      )
+        });
+      })
       .then((reply) => addChatMessage('assistant', reply || 'Got it.'))
       .catch((err) => {
         const friendly = err?.message || 'Assistant unavailable.';

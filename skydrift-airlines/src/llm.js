@@ -11,7 +11,9 @@ const apiCall = async (payload) => {
   return res.json();
 };
 
-export const generateAssistantChat = async ({ userMessage, context, history = [] }) => {
+const payloadImages = (payload) => payload?.images || [];
+
+export const generateAssistantChat = async ({ userMessage, context, history = [], images = [] }) => {
   const system = {
     role: 'system',
     content: [
@@ -28,11 +30,11 @@ export const generateAssistantChat = async ({ userMessage, context, history = []
   ].join('\n');
 
   const messages = [system, ...history.slice(-8), { role: 'user', content: contextBlock }];
-  const { content } = await apiCall({ messages, jsonMode: false });
+  const { content } = await apiCall({ messages, jsonMode: false, images: payloadImages({ images }) });
   return (content || '').trim();
 };
 
-export const generateIssueDraft = async ({ context, details }) => {
+export const generateIssueDraft = async ({ context, details, images }) => {
   const system = {
     role: 'system',
     content: [
@@ -52,7 +54,7 @@ export const generateIssueDraft = async ({ context, details }) => {
     ].join('\n')
   };
 
-  const { content } = await apiCall({ messages: [system, user], jsonMode: true });
+  const { content } = await apiCall({ messages: [system, user], jsonMode: true, images: payloadImages({ images }) });
   let parsed;
   try {
     parsed = JSON.parse(content);

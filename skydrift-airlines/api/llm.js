@@ -18,13 +18,35 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { messages, jsonMode = false, model = 'gpt-4o-mini' } = body || {};
+  const { messages, jsonMode = false, model = 'gpt-4o', images = [] } = body || {};
   if (!Array.isArray(messages) || messages.length === 0) {
     res.status(400).json({ error: 'messages array is required' });
     return;
   }
 
   const cappedMessages = messages.slice(-12);
+  const imageInputs = Array.isArray(images) ? images.slice(-3) : [];
+
+  const withImages =
+    imageInputs.length > 0
+      ? (() => {
+          const next = [...cappedMessages];
+          const lastIdx = next.length - 1;
+          const last = next[lastIdx];
+          const baseContent =
+            typeof last.content === 'string'
+              ? [{ type: 'text', text: last.content }]
+              : Array.isArray(last.content)
+                ? last.content
+                : [{ type: 'text', text: '' }];
+          const imageContent = imageInputs.map((img) => ({
+            type: 'image_url',
+            image_url: { url: img.dataUrl || img }
+          }));
+          next[lastIdx] = { ...last, content: [...baseContent, ...imageContent] };
+          return next;
+        })()
+      : cappedMessages;
 
   try {
     const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -36,7 +58,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model,
         temperature: 0.3,
-        messages: cappedMessages,
+        messages: withImages,
         ...(jsonMode ? { response_format: { type: 'json_object' } } : {})
       })
     });

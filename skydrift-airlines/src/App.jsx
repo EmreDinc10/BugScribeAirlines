@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Plane, Calendar, CreditCard, User, AlertTriangle, ChevronRight, Search, MapPin } from 'lucide-react';
 import { generateAssistantChat, generateIssueDraft } from './llm';
+import html2canvas from 'html2canvas';
 
 // --- Mock Data ---
 const FLIGHTS = [
@@ -20,6 +21,7 @@ export default function App() {
   const [chatError, setChatError] = useState('');
   const [reportError, setReportError] = useState('');
   const [issueDraft, setIssueDraft] = useState(null);
+  const [screenshots, setScreenshots] = useState([]);
   const [consoleLogs, setConsoleLogs] = useState([]);
   const [networkLogs, setNetworkLogs] = useState([]);
   const [chatMessages, setChatMessages] = useState([
@@ -46,6 +48,25 @@ export default function App() {
 
   const addChatMessage = (role, content) => {
     setChatMessages((msgs) => [...msgs, { role, content }]);
+  };
+
+  const capShots = (arr) => (arr.length > 3 ? arr.slice(arr.length - 3) : arr);
+
+  const captureScreenshot = async () => {
+    try {
+      const canvas = await html2canvas(document.body, { logging: false, useCORS: true, scale: 1 });
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      let next = [];
+      setScreenshots((prev) => {
+        const arr = capShots([...prev, { dataUrl, capturedAt: Date.now() }]);
+        next = arr;
+        return arr;
+      });
+      return next;
+    } catch (err) {
+      console.warn('Screenshot failed', err);
+      return screenshots;
+    }
   };
 
   // Capture console and network logs (lightweight, capped)
@@ -146,6 +167,15 @@ export default function App() {
     };
   }, []);
 
+  // Periodic screenshots while chat is open
+  useEffect(() => {
+    if (!chatOpen) return undefined;
+    const id = setInterval(() => {
+      captureScreenshot();
+    }, 5000);
+    return () => clearInterval(id);
+  }, [chatOpen]);
+
   const buildContextSummary = () => {
     const basics = [
       `Current step: ${step}`,
@@ -202,11 +232,16 @@ export default function App() {
     setChatBusy(true);
 
     const history = chatMessages.slice(-8).map((m) => ({ role: m.role, content: m.content }));
-    generateAssistantChat({
-      userMessage: message,
-      context: [buildContextSummary(), buildDiagnostics()].join('\n'),
-      history
-    })
+
+    captureScreenshot()
+      .then((shotList) =>
+        generateAssistantChat({
+          userMessage: message,
+          context: [buildContextSummary(), buildDiagnostics()].join('\n'),
+          history,
+          images: shotList
+        })
+      )
       .then((reply) => addChatMessage('assistant', reply || 'Got it.'))
       .catch((err) => {
         const friendly = err?.message || 'Assistant unavailable.';
@@ -221,9 +256,11 @@ export default function App() {
     setReportError('');
     setReportBusy(true);
     try {
+      const shotList = await captureScreenshot();
       const draft = await generateIssueDraft({
         context: [buildContextSummary(), buildDiagnostics()].join('\n'),
-        details: buildDetailsPayload()
+        details: buildDetailsPayload(),
+        images: shotList
       });
       setIssueDraft(draft);
       addChatMessage(

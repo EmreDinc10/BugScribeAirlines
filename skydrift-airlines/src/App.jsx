@@ -72,6 +72,9 @@ export default function App() {
         nextList = arr;
         return arr;
       });
+      if (!nextList.length) {
+        nextList = capShots([...screenshots, shot]);
+      }
       if (download) downloadLatestScreenshot(nextList);
       return nextList;
     } catch (err) {
@@ -85,7 +88,7 @@ export default function App() {
     if (!latest?.dataUrl) return;
     const a = document.createElement('a');
     a.href = latest.dataUrl;
-    a.download = `bugscribe-shot-${latest.capturedAt || Date.now()}.jpg`;
+    a.download = `bugscribe-shot-${latest.capturedAt || Date.now()}.png`;
     a.style.display = 'none';
     document.body.appendChild(a);
     a.click();

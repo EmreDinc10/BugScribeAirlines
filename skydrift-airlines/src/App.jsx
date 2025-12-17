@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Plane, Calendar, CreditCard, User, AlertTriangle, ChevronRight, Search, MapPin } from 'lucide-react';
 import { generateAssistantChat, generateIssueDraft } from './llm';
 
@@ -20,6 +20,8 @@ export default function App() {
   const [chatError, setChatError] = useState('');
   const [reportError, setReportError] = useState('');
   const [issueDraft, setIssueDraft] = useState(null);
+  const [consoleLogs, setConsoleLogs] = useState([]);
+  const [networkLogs, setNetworkLogs] = useState([]);
   const [chatMessages, setChatMessages] = useState([
     {
       role: 'assistant',
@@ -46,6 +48,104 @@ export default function App() {
     setChatMessages((msgs) => [...msgs, { role, content }]);
   };
 
+  // Capture console and network logs (lightweight, capped)
+  useEffect(() => {
+    const cap = (arr) => (arr.length > 30 ? arr.slice(arr.length - 30) : arr);
+
+    const originalConsole = { ...console };
+    const wrap = (level) => (...args) => {
+      setConsoleLogs((logs) =>
+        cap([...logs, { level, message: args.map((a) => String(a)).join(' '), at: Date.now() }])
+      );
+      originalConsole[level](...args);
+    };
+    console.log = wrap('log');
+    console.error = wrap('error');
+    console.warn = wrap('warn');
+    console.info = wrap('info');
+
+    const nativeFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const started = performance.now();
+      const [input, init = {}] = args;
+      const url = typeof input === 'string' ? input : input.url;
+      const method = init.method || (typeof input === 'object' && input.method) || 'GET';
+      try {
+        const res = await nativeFetch(...args);
+        const duration = Math.round(performance.now() - started);
+        setNetworkLogs((logs) =>
+          cap([
+            ...logs,
+            {
+              kind: 'fetch',
+              url,
+              method,
+              status: res.status,
+              duration
+            }
+          ])
+        );
+        return res;
+      } catch (err) {
+        setNetworkLogs((logs) =>
+          cap([
+            ...logs,
+            {
+              kind: 'fetch',
+              url,
+              method,
+              status: 'error',
+              error: String(err),
+              duration: Math.round(performance.now() - started)
+            }
+          ])
+        );
+        throw err;
+      }
+    };
+
+    const OriginalXHR = window.XMLHttpRequest;
+    function WrappedXHR() {
+      const xhr = new OriginalXHR();
+      let url = '';
+      let method = 'GET';
+      let started = 0;
+
+      const record = (status, error) => {
+        const duration = Math.round(performance.now() - started);
+        setNetworkLogs((logs) =>
+          cap([
+            ...logs,
+            { kind: 'xhr', url, method, status, error: error ? String(error) : undefined, duration }
+          ])
+        );
+      };
+
+      xhr.open = function (m, u, ...rest) {
+        method = m;
+        url = u;
+        return OriginalXHR.prototype.open.call(xhr, m, u, ...rest);
+      };
+      xhr.send = function (...sendArgs) {
+        started = performance.now();
+        xhr.addEventListener('loadend', () => record(xhr.status));
+        xhr.addEventListener('error', () => record('error', 'network error'));
+        return OriginalXHR.prototype.send.call(xhr, ...sendArgs);
+      };
+      return xhr;
+    }
+    window.XMLHttpRequest = WrappedXHR;
+
+    return () => {
+      console.log = originalConsole.log;
+      console.error = originalConsole.error;
+      console.warn = originalConsole.warn;
+      console.info = originalConsole.info;
+      window.fetch = nativeFetch;
+      window.XMLHttpRequest = OriginalXHR;
+    };
+  }, []);
+
   const buildContextSummary = () => {
     const basics = [
       `Current step: ${step}`,
@@ -71,6 +171,19 @@ export default function App() {
       2
     );
 
+  const buildDiagnostics = () => {
+    const recentConsole = consoleLogs.slice(-10).map((c) => `${c.level}: ${c.message}`).join(' | ');
+    const recentNetwork = networkLogs
+      .slice(-10)
+      .map((n) => `${n.method || n.kind} ${n.url} -> ${n.status} (${n.duration}ms)`)
+      .join(' | ');
+    return [
+      'Diagnostics:',
+      recentConsole ? `Console: ${recentConsole}` : 'Console: none',
+      recentNetwork ? `Network: ${recentNetwork}` : 'Network: none'
+    ].join(' \n');
+  };
+
   const openGitHubIssue = (draft) => {
     if (!draft?.title || !draft?.body) return;
     const url = `https://github.com/EmreDinc10/BugScribeAirlines/issues/new?title=${encodeURIComponent(
@@ -91,7 +204,7 @@ export default function App() {
     const history = chatMessages.slice(-8).map((m) => ({ role: m.role, content: m.content }));
     generateAssistantChat({
       userMessage: message,
-      context: buildContextSummary(),
+      context: [buildContextSummary(), buildDiagnostics()].join('\n'),
       history
     })
       .then((reply) => addChatMessage('assistant', reply || 'Got it.'))
@@ -109,7 +222,7 @@ export default function App() {
     setReportBusy(true);
     try {
       const draft = await generateIssueDraft({
-        context: buildContextSummary(),
+        context: [buildContextSummary(), buildDiagnostics()].join('\n'),
         details: buildDetailsPayload()
       });
       setIssueDraft(draft);

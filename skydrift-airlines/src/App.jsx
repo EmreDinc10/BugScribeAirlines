@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Plane, Calendar, CreditCard, User, AlertTriangle, ChevronRight, Search, MapPin } from 'lucide-react';
+import { generateAssistantChat, generateIssueDraft } from './llm';
 
 // --- Mock Data ---
 const FLIGHTS = [
@@ -12,6 +13,19 @@ export default function App() {
   const [step, setStep] = useState('search'); // search, results, details, payment, crash
   const [loading, setLoading] = useState(false);
   const [cardNumberError, setCardNumberError] = useState('');
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [chatBusy, setChatBusy] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [chatError, setChatError] = useState('');
+  const [reportError, setReportError] = useState('');
+  const [issueDraft, setIssueDraft] = useState(null);
+  const [chatMessages, setChatMessages] = useState([
+    {
+      role: 'assistant',
+      content: "Hi! I'm BugScribe Assistant. Ask me about this flow or report a bug."
+    }
+  ]);
   
   // Form State (This is the data we want to lose to prove a point)
   const [formData, setFormData] = useState({
@@ -27,6 +41,91 @@ export default function App() {
     expiry: '',
     cvv: ''
   });
+
+  const addChatMessage = (role, content) => {
+    setChatMessages((msgs) => [...msgs, { role, content }]);
+  };
+
+  const buildContextSummary = () => {
+    const basics = [
+      `Current step: ${step}`,
+      `Route: ${formData.from} -> ${formData.to}`,
+      `Date: ${formData.date || 'not chosen'}`,
+      `Passenger: ${formData.firstName || 'N/A'} ${formData.lastName || ''}`.trim(),
+      `Card error: ${cardNumberError || 'none'}`
+    ];
+    if (step === 'crash') {
+      basics.push('UI crashed after payment simulation. Try reset and retry.');
+    }
+    return basics.join(' | ');
+  };
+
+  const buildDetailsPayload = () =>
+    JSON.stringify(
+      {
+        step,
+        formData,
+        cardNumberError
+      },
+      null,
+      2
+    );
+
+  const openGitHubIssue = (draft) => {
+    if (!draft?.title || !draft?.body) return;
+    const url = `https://github.com/EmreDinc10/BugScribeAirlines/issues/new?title=${encodeURIComponent(
+      draft.title
+    )}&body=${encodeURIComponent(draft.body)}`;
+    window.open(url, '_blank', 'noopener');
+  };
+
+  const handleChatSend = (e) => {
+    e.preventDefault();
+    if (!chatInput.trim() || chatBusy) return;
+    const message = chatInput.trim();
+    addChatMessage('user', message);
+    setChatInput('');
+    setChatError('');
+    setChatBusy(true);
+
+    const history = chatMessages.slice(-8).map((m) => ({ role: m.role, content: m.content }));
+    generateAssistantChat({
+      userMessage: message,
+      context: buildContextSummary(),
+      history
+    })
+      .then((reply) => addChatMessage('assistant', reply || 'Got it.'))
+      .catch((err) => {
+        const friendly = err?.message || 'Assistant unavailable.';
+        setChatError(friendly);
+        addChatMessage('assistant', 'Sorry, I could not reach the assistant.');
+      })
+      .finally(() => setChatBusy(false));
+  };
+
+  const handleReportBug = async () => {
+    if (reportBusy) return;
+    setReportError('');
+    setReportBusy(true);
+    try {
+      const draft = await generateIssueDraft({
+        context: buildContextSummary(),
+        details: buildDetailsPayload()
+      });
+      setIssueDraft(draft);
+      addChatMessage(
+        'assistant',
+        `Issue draft ready: ${draft.title}\nOpening GitHub with the body prefilled.`
+      );
+      openGitHubIssue(draft);
+    } catch (err) {
+      const friendly = err?.message || 'Failed to create issue draft.';
+      setReportError(friendly);
+      addChatMessage('assistant', 'Could not prepare issue draft.');
+    } finally {
+      setReportBusy(false);
+    }
+  };
 
   // --- Handlers ---
   const handleSearch = (e) => {
@@ -427,6 +526,86 @@ export default function App() {
         <p>© 2025 SkyDrift Airlines. All rights reserved.</p>
         <p className="text-xs mt-1">Running Build v2.4.0-alpha (Debug Mode)</p>
       </footer>
+
+      {/* BugScribe-style assistant launcher */}
+      <button
+        aria-label="Open BugScribe Assistant"
+        onClick={() => setChatOpen(true)}
+        className="fixed bottom-6 right-6 w-12 h-12 rounded-full border border-sky-900 bg-white text-sky-900 shadow-xl text-2xl font-bold hover:bg-sky-50 transition-colors"
+        style={{ zIndex: 50 }}
+      >
+        ?
+      </button>
+
+      {chatOpen && (
+        <div
+          className="fixed bottom-24 right-6 w-96 max-w-full bg-slate-950 text-slate-100 border border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+          style={{ zIndex: 50 }}
+        >
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+            <div className="font-semibold">BugScribe Assistant</div>
+            <button
+              className="text-slate-400 hover:text-white"
+              onClick={() => setChatOpen(false)}
+              aria-label="Close chat"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="flex-1 p-4 space-y-3 overflow-y-auto max-h-80">
+            {chatMessages.map((msg, idx) => (
+              <div
+                key={`${msg.role}-${idx}`}
+                className={`max-w-[90%] text-sm leading-relaxed px-3 py-2 rounded-xl ${
+                  msg.role === 'user'
+                    ? 'bg-sky-600 ml-auto text-white'
+                    : 'bg-slate-900 border border-slate-800'
+                }`}
+              >
+                {msg.content}
+              </div>
+            ))}
+          </div>
+
+          <form onSubmit={handleChatSend} className="p-4 border-t border-slate-800 space-y-3">
+            <textarea
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              rows={3}
+              placeholder="Describe what you need help with…"
+              className="w-full bg-slate-900 border border-slate-800 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-600"
+            />
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={chatBusy}
+                className="flex-1 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-700 text-white font-semibold py-2 rounded-lg transition-colors"
+              >
+                {chatBusy ? 'Thinking…' : 'Send'}
+              </button>
+              <button
+                type="button"
+                onClick={handleReportBug}
+                disabled={reportBusy}
+                className="bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
+              >
+                {reportBusy ? 'Preparing…' : 'Report bug'}
+              </button>
+            </div>
+            {(chatError || reportError) && (
+              <p className="text-xs text-rose-300">
+                {chatError || reportError}
+              </p>
+            )}
+            {issueDraft && (
+              <p className="text-xs text-slate-400">
+                Last draft: {issueDraft.title}
+              </p>
+            )}
+          </form>
+        </div>
+      )}
     </div>
   );
 }

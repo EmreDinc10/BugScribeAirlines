@@ -5,10 +5,18 @@ import html2canvas from 'html2canvas';
 
 // --- Mock Data ---
 const FLIGHTS = [
-  { id: 1, airline: 'SkyDrift', time: '08:00 AM - 10:30 AM', duration: '2h 30m', price: 120, route: 'IST -> LHR' },
-  { id: 2, airline: 'SkyDrift', time: '02:00 PM - 04:45 PM', duration: '2h 45m', price: 145, route: 'IST -> LHR' },
-  { id: 3, airline: 'SkyDrift', time: '08:00 PM - 10:30 PM', duration: '2h 30m', price: 95, route: 'IST -> LHR' },
+  { id: 1, airline: 'SkyDrift', time: '06:00 AM - 08:15 AM', duration: '2h 15m', price: 125, route: 'IST -> LHR', class: 'Economy' },
+  { id: 2, airline: 'SkyDrift', time: '08:00 AM - 10:30 AM', duration: '2h 30m', price: 120, route: 'IST -> LHR', class: 'Economy' },
+  { id: 3, airline: 'SkyDrift', time: '10:15 AM - 12:45 PM', duration: '2h 30m', price: 135, route: 'IST -> LHR', class: 'Economy' },
+  { id: 4, airline: 'SkyDrift', time: '02:00 PM - 04:45 PM', duration: '2h 45m', price: 145, route: 'IST -> LHR', class: 'Economy' },
+  { id: 5, airline: 'SkyDrift', time: '04:30 PM - 07:00 PM', duration: '2h 30m', price: 150, route: 'IST -> LHR', class: 'Business' },
+  { id: 6, airline: 'SkyDrift', time: '06:00 PM - 08:30 PM', duration: '2h 30m', price: 140, route: 'IST -> LHR', class: 'Economy' },
+  { id: 7, airline: 'SkyDrift', time: '08:00 PM - 10:30 PM', duration: '2h 30m', price: 95, route: 'IST -> LHR', class: 'Economy' },
+  { id: 8, airline: 'SkyDrift', time: '10:45 PM - 01:15 AM+1', duration: '2h 30m', price: 110, route: 'IST -> LHR', class: 'Economy' },
 ];
+
+// Business rules
+const MAX_BOOKING_DAYS = 60; // Maximum days in advance for booking
 
 const STORAGE_KEY = 'bugscribe_session';
 
@@ -17,6 +25,8 @@ export default function App() {
   const [step, setStep] = useState('search'); // search, results, details, payment, crash
   const [loading, setLoading] = useState(false);
   const [cardNumberError, setCardNumberError] = useState('');
+  const [dateError, setDateError] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [chatBusy, setChatBusy] = useState(false);
@@ -208,12 +218,16 @@ export default function App() {
       `Date: ${formData.date || 'not chosen'}`,
       `Passenger: ${formData.firstName || 'N/A'} ${formData.lastName || ''}`.trim(),
       `Card error: ${cardNumberError || 'none'}`,
+      `Date error: ${dateError || 'none'}`,
       screenshots.length
         ? `Screenshots: ${screenshots.length} (last is most recent; use it for visual state)`
         : 'Screenshots: none available'
     ];
     if (step === 'crash') {
       basics.push('UI crashed after payment simulation. Try reset and retry.');
+    }
+    if (step === 'results' && searchResults.length === 0) {
+      basics.push('Search returned no results (empty state shown).');
     }
     return basics.join(' | ');
   };
@@ -223,7 +237,9 @@ export default function App() {
       {
         step,
         formData,
-        cardNumberError
+        cardNumberError,
+        dateError,
+        searchResultsCount: searchResults.length
       },
       null,
       2
@@ -357,13 +373,113 @@ export default function App() {
     }
   };
 
+  // --- Date validation helpers ---
+  const validateDateRange = (dateString) => {
+    if (!dateString) {
+      setDateError('');
+      return true;
+    }
+
+    const selectedDate = new Date(dateString);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Reset time to start of day
+    
+    const maxDate = new Date(today);
+    maxDate.setDate(today.getDate() + MAX_BOOKING_DAYS);
+
+    // Check if date is in the past
+    if (selectedDate < today) {
+      const errorMsg = 'Departure date cannot be in the past. Please select a future date.';
+      setDateError(errorMsg);
+      console.warn(`[SkyDrift] Date validation failed: Past date selected. Selected: ${dateString}, Today: ${today.toISOString().split('T')[0]}`);
+      return false;
+    }
+
+    // Check if date exceeds maximum booking window
+    if (selectedDate > maxDate) {
+      const daysOver = Math.ceil((selectedDate - maxDate) / (1000 * 60 * 60 * 24));
+      const errorMsg = `Flights can only be booked up to ${MAX_BOOKING_DAYS} days in advance. Your selected date is ${daysOver} day(s) beyond the limit.`;
+      setDateError(errorMsg);
+      console.warn(`[SkyDrift] Date validation failed: Exceeds maximum booking window. Selected: ${dateString}, Max allowed: ${maxDate.toISOString().split('T')[0]}, Days over limit: ${daysOver}`);
+      console.info(`[SkyDrift] Business rule: Maximum booking window is ${MAX_BOOKING_DAYS} days. This is a business policy, not a technical limitation.`);
+      return false;
+    }
+
+    setDateError('');
+    return true;
+  };
+
+  const sanitizeDateInput = (value) => {
+    // Remove any non-date characters and ensure proper format
+    // Allow only valid date format (YYYY-MM-DD)
+    if (!value) return '';
+    
+    // Basic sanitization - remove any script tags or dangerous characters
+    const sanitized = value.replace(/[<>]/g, '');
+    
+    // Validate it's a proper date string format
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (sanitized && !dateRegex.test(sanitized)) {
+      // If it doesn't match the expected format, return empty to let browser handle it
+      return '';
+    }
+    
+    return sanitized;
+  };
+
   // --- Handlers ---
   const handleSearch = (e) => {
     e.preventDefault();
+    
+    // Clear previous errors
+    setDateError('');
+    
+    // Validate date if provided
+    if (!formData.date) {
+      setDateError('Please select a departure date.');
+      return;
+    }
+
+    if (!validateDateRange(formData.date)) {
+      // Date validation failed, don't proceed
+      return;
+    }
+
     setLoading(true);
+    
     // Simulate API search
+    const selectedDate = new Date(formData.date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const daysUntilFlight = Math.ceil((selectedDate - today) / (1000 * 60 * 60 * 24));
+    
     console.log(`[SkyDrift] Searching flights for route: ${formData.from} to ${formData.to}`);
+    console.log(`[SkyDrift] Departure date: ${formData.date} (${daysUntilFlight} days from today)`);
+    console.log(`[SkyDrift] Booking window check: ${daysUntilFlight} days (max: ${MAX_BOOKING_DAYS} days)`);
+    
+    // Simulate API delay
     setTimeout(() => {
+      // Check if date is within valid range (double-check, in case user manipulated the input)
+      const dateObj = new Date(formData.date);
+      const maxDate = new Date(today);
+      maxDate.setDate(today.getDate() + MAX_BOOKING_DAYS);
+      
+      if (dateObj > maxDate) {
+        // Date exceeds limit - return empty results (this looks like a bug to users)
+        console.warn(`[SkyDrift] Search date exceeds maximum booking window (${MAX_BOOKING_DAYS} days). Selected: ${formData.date}, Max allowed: ${maxDate.toISOString().split('T')[0]}`);
+        console.info(`[SkyDrift] Business rule: Flights are only available for booking up to ${MAX_BOOKING_DAYS} days in advance. This is a business policy limitation, not a technical bug.`);
+        console.log(`[SkyDrift] API response: 200 OK, but no flights found (date out of booking window)`);
+        setSearchResults([]);
+      } else if (dateObj < today) {
+        // Past date - return empty results
+        console.warn(`[SkyDrift] Search date is in the past. Selected: ${formData.date}, Today: ${today.toISOString().split('T')[0]}`);
+        setSearchResults([]);
+      } else {
+        // Valid date - return flight results
+        console.log(`[SkyDrift] API response: 200 OK, ${FLIGHTS.length} flights found`);
+        setSearchResults(FLIGHTS);
+      }
+      
       setLoading(false);
       setStep('results');
     }, 800);
@@ -439,6 +555,8 @@ export default function App() {
       cvv: ''
     });
     setCardNumberError('');
+    setDateError('');
+    setSearchResults([]);
     setStep('search');
     console.clear();
   };
@@ -523,7 +641,7 @@ export default function App() {
                 </div>
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-gray-500 uppercase">Departure</label>
                   <div className="relative">
@@ -531,9 +649,36 @@ export default function App() {
                     <input 
                       type="date" 
                       required
-                      className="w-full pl-10 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 outline-none" 
+                      value={formData.date}
+                      onChange={(e) => {
+                        const sanitized = sanitizeDateInput(e.target.value);
+                        setFormData({...formData, date: sanitized});
+                        setDateError(''); // Clear error when user changes date
+                        // Validate on change for immediate feedback
+                        if (sanitized) {
+                          validateDateRange(sanitized);
+                        }
+                      }}
+                      min={new Date().toISOString().split('T')[0]} // Prevent past dates
+                      max={(() => {
+                        const maxDate = new Date();
+                        maxDate.setDate(maxDate.getDate() + MAX_BOOKING_DAYS);
+                        return maxDate.toISOString().split('T')[0];
+                      })()} // Set max to 60 days from today
+                      className={`w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-sky-500 outline-none ${
+                        dateError ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
+                      }`}
                     />
                   </div>
+                  {dateError && (
+                    <p className="text-red-600 text-xs mt-1 flex items-center">
+                      <AlertTriangle className="h-3 w-3 mr-1" />
+                      {dateError}
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-400 mt-1">
+                    Book up to {MAX_BOOKING_DAYS} days in advance
+                  </p>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-gray-500 uppercase">Passengers</label>
@@ -563,25 +708,49 @@ export default function App() {
         {step === 'results' && (
           <div className="space-y-4 animate-fade-in">
              <h2 className="text-xl font-bold text-gray-700">Select your outbound flight</h2>
-             <p className="text-sm text-gray-500 mb-4">{formData.from} to {formData.to}</p>
+             <p className="text-sm text-gray-500 mb-4">
+               {formData.from} to {formData.to} • {formData.date ? new Date(formData.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
+             </p>
              
-             {FLIGHTS.map(flight => (
-               <div key={flight.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:border-sky-500 cursor-pointer transition-all group" onClick={() => selectFlight(flight)}>
-                 <div className="flex justify-between items-center">
-                   <div className="flex items-center space-x-4">
-                      <div className="h-10 w-10 bg-sky-100 rounded-full flex items-center justify-center text-sky-700 font-bold">SD</div>
-                      <div>
-                        <div className="font-bold text-lg">{flight.time}</div>
-                        <div className="text-sm text-gray-500">{flight.airline} • Direct</div>
-                      </div>
-                   </div>
-                   <div className="text-right">
-                      <div className="text-2xl font-bold text-gray-800">${flight.price}</div>
-                      <div className="text-xs text-green-600 font-medium">Economy</div>
+             {searchResults.length === 0 ? (
+               <div className="bg-white p-12 rounded-xl shadow-sm border border-gray-200 text-center">
+                 <div className="flex justify-center mb-4">
+                   <Plane className="h-12 w-12 text-gray-300" />
+                 </div>
+                 <h3 className="text-lg font-semibold text-gray-700 mb-2">No flights found</h3>
+                 <p className="text-sm text-gray-500 mb-6">
+                   We couldn't find any flights matching your search criteria.
+                 </p>
+                 <button
+                   onClick={() => setStep('search')}
+                   className="text-sky-600 hover:text-sky-700 text-sm font-medium underline"
+                 >
+                   Try a different search
+                 </button>
+               </div>
+             ) : (
+               searchResults.map(flight => (
+                 <div key={flight.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:border-sky-500 cursor-pointer transition-all group" onClick={() => selectFlight(flight)}>
+                   <div className="flex justify-between items-center">
+                     <div className="flex items-center space-x-4">
+                        <div className="h-10 w-10 bg-sky-100 rounded-full flex items-center justify-center text-sky-700 font-bold">SD</div>
+                        <div>
+                          <div className="font-bold text-lg">{flight.time}</div>
+                          <div className="text-sm text-gray-500">{flight.airline} • Direct • {flight.duration}</div>
+                        </div>
+                     </div>
+                     <div className="text-right">
+                        <div className="text-2xl font-bold text-gray-800">${flight.price}</div>
+                        <div className={`text-xs font-medium ${
+                          flight.class === 'Business' ? 'text-purple-600' : 'text-green-600'
+                        }`}>
+                          {flight.class}
+                        </div>
+                     </div>
                    </div>
                  </div>
-               </div>
-             ))}
+               ))
+             )}
           </div>
         )}
 

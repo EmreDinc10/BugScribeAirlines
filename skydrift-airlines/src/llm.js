@@ -70,3 +70,6 @@ export const generateIssueDraft = async ({ context, details, images }) => {
   }
   return parsed;
 };
+
+
+

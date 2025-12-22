@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Plane, Calendar, CreditCard, User, AlertTriangle, ChevronRight, Search, MapPin } from 'lucide-react';
+import { Plane, Calendar, CreditCard, User, AlertTriangle, ChevronRight, Search, MapPin, CheckCircle } from 'lucide-react';
 import { generateAssistantChat, generateIssueDraft } from './llm';
 import html2canvas from 'html2canvas';
 
@@ -22,10 +22,11 @@ const STORAGE_KEY = 'bugscribe_session';
 
 export default function App() {
   const appRef = useRef(null);
-  const [step, setStep] = useState('search'); // search, results, details, payment, crash
+  const [step, setStep] = useState('search'); // search, results, details, payment, success
   const [loading, setLoading] = useState(false);
   const [cardNumberError, setCardNumberError] = useState('');
   const [dateError, setDateError] = useState('');
+  const [paymentDateError, setPaymentDateError] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
@@ -211,6 +212,16 @@ export default function App() {
     return () => clearInterval(id);
   }, [chatOpen]);
 
+  // Auto-suggest when chat opens with payment date error
+  useEffect(() => {
+    if (chatOpen && paymentDateError && chatMessages.length === 1) {
+      // Only add if it's the initial message (just opened)
+      const suggestion = "BugScribe Suggestion: Did you check the dates? The selected departure date may be in the past or invalid. Your booking details (date, route, passenger info) will be included in any bug report.";
+      addChatMessage('assistant', suggestion);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatOpen, paymentDateError]);
+
   const buildContextSummary = () => {
     const basics = [
       `Current step: ${step}`,
@@ -219,31 +230,53 @@ export default function App() {
       `Passenger: ${formData.firstName || 'N/A'} ${formData.lastName || ''}`.trim(),
       `Card error: ${cardNumberError || 'none'}`,
       `Date error: ${dateError || 'none'}`,
+      `Payment date error: ${paymentDateError || 'none'}`,
       screenshots.length
         ? `Screenshots: ${screenshots.length} (last is most recent; use it for visual state)`
         : 'Screenshots: none available'
     ];
-    if (step === 'crash') {
-      basics.push('UI crashed after payment simulation. Try reset and retry.');
+    if (step === 'success') {
+      basics.push('Payment completed successfully. Booking confirmed.');
     }
     if (step === 'results' && searchResults.length === 0) {
       basics.push('Search returned no results (empty state shown).');
     }
+    if (paymentDateError) {
+      basics.push('Payment blocked: Unable to create booking. Departure date is in the past. BugScribe suggestion: Did you check the dates?');
+      if (selectedFlightId) {
+        const selectedFlight = FLIGHTS.find(f => f.id === selectedFlightId);
+        if (selectedFlight) {
+          basics.push(`Selected Flight: ${selectedFlight.time}, ${selectedFlight.class}, $${selectedFlight.price}`);
+        }
+      }
+    }
     return basics.join(' | ');
   };
 
-  const buildDetailsPayload = () =>
-    JSON.stringify(
+  const buildDetailsPayload = () => {
+    const selectedFlight = selectedFlightId ? FLIGHTS.find(f => f.id === selectedFlightId) : null;
+    return JSON.stringify(
       {
         step,
         formData,
         cardNumberError,
         dateError,
-        searchResultsCount: searchResults.length
+        paymentDateError,
+        searchResultsCount: searchResults.length,
+        selectedFlightId,
+        selectedFlight: selectedFlight ? {
+          id: selectedFlight.id,
+          time: selectedFlight.time,
+          duration: selectedFlight.duration,
+          price: selectedFlight.price,
+          class: selectedFlight.class,
+          route: selectedFlight.route
+        } : null
       },
       null,
       2
     );
+  };
 
   const buildDiagnostics = () => {
     const recentConsole = consoleLogs.slice(-10).map((c) => `${c.level}: ${c.message}`).join(' | ');
@@ -501,6 +534,32 @@ export default function App() {
   const handleFinalBooking = (e) => {
     e.preventDefault();
     
+    // Clear previous errors
+    setCardNumberError('');
+    setPaymentDateError('');
+    
+    // Validate departure date - check if it's in the past
+    if (formData.date) {
+      const selectedDate = new Date(formData.date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      selectedDate.setHours(0, 0, 0, 0);
+      
+      if (selectedDate < today) {
+        const daysPast = Math.ceil((today - selectedDate) / (1000 * 60 * 60 * 24));
+        const errorMessage = `Unable to create booking. Please check your selected dates.`;
+        setPaymentDateError(errorMessage);
+        console.error('[SkyDrift] Booking Failed: Unable to create booking');
+        console.error(`[SkyDrift] Selected departure date: ${formData.date} (${daysPast} day(s) in the past)`);
+        console.error(`[SkyDrift] Today's date: ${today.toISOString().split('T')[0]}`);
+        console.error(`[SkyDrift] Route: ${formData.from} → ${formData.to}`);
+        console.error(`[SkyDrift] Passenger: ${formData.firstName} ${formData.lastName}`);
+        console.error(`[SkyDrift] Selected Flight ID: ${selectedFlightId}`);
+        console.warn('[SkyDrift] SUGGESTION: Did you check the dates? The selected departure date is in the past.');
+        return; // Prevent payment processing
+      }
+    }
+    
     // Validate card number - must have exactly 16 digits
     const cardNumberDigits = formData.cardNumber.replace(/\s/g, ''); // Remove spaces
     const expectedDigits = 16;
@@ -513,8 +572,6 @@ export default function App() {
       return; // Prevent form submission
     }
     
-    // Clear any previous errors
-    setCardNumberError('');
     setLoading(true);
 
     console.log('[SkyDrift] Initiating transaction...');
@@ -522,19 +579,15 @@ export default function App() {
 
     // Simulate network delay
     setTimeout(() => {
-      // 1. Log legitimate-looking events
+      // Log successful payment processing
       console.log('[SkyDrift] Payment Gateway: Handshake successful.');
-      console.warn('[SkyDrift] Warning: Response time > 500ms');
-
-      // 2. THE CRASH
-      console.error('Uncaught TypeError: Cannot read properties of undefined (reading "confirmation_code")');
-      console.error('    at processBookingResponse (TransactionManager.js:402)');
-      console.error('    at XMLHttpRequest.onreadystatechange (NetworkClient.js:55)');
+      console.log('[SkyDrift] Processing payment...');
+      console.log('[SkyDrift] Payment approved. Confirmation code: BK' + Math.random().toString(36).substr(2, 9).toUpperCase());
       
       setLoading(false);
       
-      // 3. Move to Crash State (Data is still in memory, but UI is broken)
-      setStep('crash');
+      // Move to Success State
+      setStep('success');
     }, 2000);
   };
 
@@ -556,6 +609,7 @@ export default function App() {
     });
     setCardNumberError('');
     setDateError('');
+    setPaymentDateError('');
     setSearchResults([]);
     setStep('search');
     console.clear();
@@ -577,9 +631,9 @@ export default function App() {
 
   const ProgressBar = () => {
     const steps = ['Search', 'Flight', 'Details', 'Payment'];
-    const currentIdx = ['search', 'results', 'details', 'payment', 'crash'].indexOf(step);
+    const currentIdx = ['search', 'results', 'details', 'payment', 'success'].indexOf(step);
     
-    if (step === 'crash') return null;
+    if (step === 'success') return null;
 
     return (
       <div className="max-w-2xl mx-auto mt-8 mb-8">
@@ -659,12 +713,12 @@ export default function App() {
                           validateDateRange(sanitized);
                         }
                       }}
-                      min={new Date().toISOString().split('T')[0]} // Prevent past dates
                       max={(() => {
                         const maxDate = new Date();
                         maxDate.setDate(maxDate.getDate() + MAX_BOOKING_DAYS);
                         return maxDate.toISOString().split('T')[0];
                       })()} // Set max to 60 days from today
+                      // Note: min attribute removed to allow past dates for testing
                       className={`w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-sky-500 outline-none ${
                         dateError ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
                       }`}
@@ -827,6 +881,39 @@ export default function App() {
                <div className="text-sm text-gray-500">Includes taxes and fees</div>
              </div>
 
+             {paymentDateError && (
+               <div className="bg-red-50 border-2 border-red-500 rounded-lg p-4 mb-6">
+                 <div className="flex items-start">
+                   <AlertTriangle className="h-5 w-5 text-red-600 mr-3 mt-0.5 flex-shrink-0" />
+                   <div className="flex-1">
+                     <h3 className="text-red-800 font-semibold mb-2">Unable to Create Booking</h3>
+                     <p className="text-red-700 text-sm mb-3">{paymentDateError}</p>
+                     <div className="bg-white border border-red-300 rounded p-3 mt-3">
+                       <p className="text-sm text-gray-700 mb-2">
+                         <strong>BugScribe Suggestion:</strong> Did you check the dates? The selected departure date may be in the past or invalid.
+                       </p>
+                       <p className="text-xs text-gray-600 mb-3">
+                         Your booking details (date, route, passenger info) will be included in the bug report.
+                       </p>
+                       <button
+                         type="button"
+                         onClick={() => {
+                           setChatOpen(true);
+                           // Auto-trigger bug report after a short delay
+                           setTimeout(() => {
+                             handleReportBug();
+                           }, 500);
+                         }}
+                         className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition-colors"
+                       >
+                         Generate Bug Report with Booking Details
+                       </button>
+                     </div>
+                   </div>
+                 </div>
+               </div>
+             )}
+
              <form onSubmit={handleFinalBooking} className="space-y-4">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-gray-500">Card Number</label>
@@ -889,34 +976,42 @@ export default function App() {
           </div>
         )}
 
-        {/* STEP 5: THE CRASH (The Bug) */}
-        {step === 'crash' && (
-          <div className="bg-white p-8 rounded-xl shadow-2xl border-t-8 border-red-600 text-center animate-bounce-in">
+        {/* STEP 5: SUCCESS */}
+        {step === 'success' && (
+          <div className="bg-white p-8 rounded-xl shadow-2xl border-t-8 border-green-600 text-center animate-fade-in">
             <div className="flex justify-center mb-6">
-              <div className="bg-red-100 p-4 rounded-full">
-                <AlertTriangle className="h-12 w-12 text-red-600" />
+              <div className="bg-green-100 p-4 rounded-full">
+                <CheckCircle className="h-12 w-12 text-green-600" />
               </div>
             </div>
-            <h1 className="text-3xl font-extrabold text-gray-900 mb-2">System Error</h1>
-            <p className="text-red-600 font-mono bg-red-50 p-2 rounded mb-6 text-sm">
-              Error 500: Internal Server Exception <br/>
-              Request ID: req_99f8a7d
+            <h1 className="text-3xl font-extrabold text-gray-900 mb-2">Booking Confirmed!</h1>
+            <p className="text-green-600 font-semibold mb-4">
+              Your flight has been successfully booked
             </p>
+            <div className="bg-gray-50 p-4 rounded-lg mb-6 text-left">
+              <p className="text-sm text-gray-600 mb-2">
+                <strong>Route:</strong> {formData.from} → {formData.to}
+              </p>
+              <p className="text-sm text-gray-600 mb-2">
+                <strong>Date:</strong> {formData.date ? new Date(formData.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'N/A'}
+              </p>
+              <p className="text-sm text-gray-600 mb-2">
+                <strong>Passenger:</strong> {formData.firstName} {formData.lastName}
+              </p>
+              <p className="text-sm text-gray-600">
+                <strong>Confirmation:</strong> A confirmation email has been sent to {formData.email}
+              </p>
+            </div>
             <p className="text-gray-600 mb-8">
-              We encountered a critical error while processing your payment. 
-              The transaction gateway did not return a valid confirmation code.
-              Please return to the home page and try again.
+              Thank you for choosing SkyDrift Airlines. We look forward to serving you!
             </p>
 
             <button 
               onClick={handleReset}
-              className="px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors w-full"
+              className="px-6 py-3 bg-sky-600 text-white rounded-lg hover:bg-sky-700 transition-colors w-full"
             >
-              Return to Home
+              Book Another Flight
             </button>
-            <p className="text-xs text-gray-400 mt-4 italic">
-              (Note: Returning to home will clear your current session data)
-            </p>
           </div>
         )}
 

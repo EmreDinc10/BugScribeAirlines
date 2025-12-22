@@ -19,6 +19,7 @@ export const generateAssistantChat = async ({ userMessage, context, history = []
     content: [
       'You are BugScribe Assistant. Respond in plain text only.',
       'Keep replies concise (<=60 words). No markdown. Friendly and direct.',
+      'If the context mentions "Payment date error" or "past date" or "Unable to create booking", always start your response with: "BugScribe Suggestion: Did you check the dates? The selected departure date may be in the past or invalid." Then provide helpful guidance.',
       'If images are provided, reason about the latest image first and describe only what you actually see.',
       'If no images are provided, clearly state that you do not see a screenshot and rely only on text context.'
     ].join(' ')
@@ -44,6 +45,8 @@ export const generateIssueDraft = async ({ context, details, images }) => {
       'Respond ONLY as a JSON object: {"title":"...","body":"..."}',
       'Body should be Markdown with sections: Summary, Steps to Reproduce, Expected, Actual, Notes.',
       'Keep concise bullet points.',
+      'If the context mentions "Payment date error" or "past date", include a suggestion in the Notes section: "BugScribe Suggestion: Did you check the dates? The selected departure date may be in the past or invalid."',
+      'Always include booking details (date, route, passenger info, flight ID) from the Details section in the issue body.',
       'If images are provided, prioritize the latest image to describe the current UI state and include concise visual observations.',
       'If no images are provided, explicitly note that screenshots were not available.'
     ].join(' ')
@@ -70,6 +73,7 @@ export const generateIssueDraft = async ({ context, details, images }) => {
   }
   return parsed;
 };
+
 
 
 

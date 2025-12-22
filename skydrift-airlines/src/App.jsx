@@ -17,8 +17,34 @@ const FLIGHTS = [
 
 // Business rules
 const MAX_BOOKING_DAYS = 60; // Maximum days in advance for booking
+const USD_TO_TL_RATE = 30; // Exchange rate: 1 USD = 30 TL (approximate)
 
 const STORAGE_KEY = 'bugscribe_session';
+
+// Currency conversion - intended behavior based on user location
+const getUserLocation = () => {
+  // Simulate location detection - in real app this would use geolocation API
+  // For demo: Assume user is in Turkey (TR) if route includes IST
+  return 'TR'; // Always TR for this demo scenario
+};
+
+const formatPrice = (priceUSD, showBoth = false) => {
+  const location = getUserLocation();
+  if (location === 'TR') {
+    const priceTL = Math.round(priceUSD * USD_TO_TL_RATE);
+    const formattedTL = new Intl.NumberFormat('tr-TR', { 
+      style: 'currency', 
+      currency: 'TRY',
+      minimumFractionDigits: 0 
+    }).format(priceTL);
+    
+    if (showBoth) {
+      return `${formattedTL} ($${priceUSD})`;
+    }
+    return formattedTL;
+  }
+  return `$${priceUSD}`;
+};
 
 export default function App() {
   const appRef = useRef(null);
@@ -251,9 +277,18 @@ export default function App() {
       if (selectedFlightId) {
         const selectedFlight = FLIGHTS.find(f => f.id === selectedFlightId);
         if (selectedFlight) {
-          basics.push(`Selected Flight: ${selectedFlight.time}, ${selectedFlight.class}, $${selectedFlight.price}`);
+          const location = getUserLocation();
+          if (location === 'TR') {
+            basics.push(`Selected Flight: ${selectedFlight.time}, ${selectedFlight.class}, ${formatPrice(selectedFlight.price)} (converted from $${selectedFlight.price} USD)`);
+          } else {
+            basics.push(`Selected Flight: ${selectedFlight.time}, ${selectedFlight.class}, $${selectedFlight.price}`);
+          }
         }
       }
+    }
+    // Add currency conversion info if user is in TR
+    if (getUserLocation() === 'TR' && step === 'results' && searchResults.length > 0) {
+      basics.push('Currency conversion: Prices displayed in Turkish Lira (TL) - INTENDED BEHAVIOR based on user location (TR)');
     }
     return basics.join(' | ');
   };
@@ -514,7 +549,17 @@ export default function App() {
         setSearchResults([]);
       } else {
         // Valid date - return flight results
+        const location = getUserLocation();
         console.log(`[SkyDrift] API response: 200 OK, ${FLIGHTS.length} flights found`);
+        if (location === 'TR') {
+          console.log(`[SkyDrift] User location detected: Turkey (TR)`);
+          console.log(`[SkyDrift] Applying currency conversion: USD → TL (Rate: ${USD_TO_TL_RATE})`);
+          console.info(`[SkyDrift] INTENDED BEHAVIOR: Flight prices are automatically converted to Turkish Lira (TL) based on user's location (TR). This is a feature, not a bug.`);
+          FLIGHTS.forEach(flight => {
+            const priceTL = Math.round(flight.price * USD_TO_TL_RATE);
+            console.log(`[SkyDrift] Flight ${flight.id}: $${flight.price} USD = ₺${priceTL} TL`);
+          });
+        }
         setSearchResults(FLIGHTS);
       }
       
@@ -524,7 +569,13 @@ export default function App() {
   };
 
   const selectFlight = (flight) => {
+    const location = getUserLocation();
     console.log(`[SkyDrift] Flight selected: ID ${flight.id}`);
+    if (location === 'TR') {
+      const priceTL = Math.round(flight.price * USD_TO_TL_RATE);
+      console.log(`[SkyDrift] Currency conversion: $${flight.price} USD → ₺${priceTL} TL (Rate: ${USD_TO_TL_RATE})`);
+      console.info(`[SkyDrift] INTENDED BEHAVIOR: Prices displayed in Turkish Lira (TL) because user location is Turkey (TR). This is automatic currency conversion based on geolocation, not a bug.`);
+    }
     setSelectedFlightId(flight.id);
     setStep('details');
   };
@@ -799,12 +850,17 @@ export default function App() {
                         </div>
                      </div>
                      <div className="text-right">
-                        <div className="text-2xl font-bold text-gray-800">${flight.price}</div>
+                        <div className="text-2xl font-bold text-gray-800">{formatPrice(flight.price)}</div>
                         <div className={`text-xs font-medium ${
                           flight.class === 'Business' ? 'text-purple-600' : 'text-green-600'
                         }`}>
                           {flight.class}
                         </div>
+                        {getUserLocation() === 'TR' && (
+                          <div className="text-xs text-gray-400 mt-1">
+                            Converted from ${flight.price} USD
+                          </div>
+                        )}
                      </div>
                    </div>
                  </div>
@@ -881,9 +937,22 @@ export default function App() {
              <div className="bg-gray-50 p-4 rounded-lg mb-6 border border-gray-200">
                <div className="flex justify-between items-center mb-2">
                  <span className="text-gray-600">Total Amount</span>
-                 <span className="text-xl font-bold">$120.00</span>
+                 <span className="text-xl font-bold">
+                   {(() => {
+                     const selectedFlight = selectedFlightId ? FLIGHTS.find(f => f.id === selectedFlightId) : null;
+                     const price = selectedFlight ? selectedFlight.price : 120;
+                     return formatPrice(price);
+                   })()}
+                 </span>
                </div>
-               <div className="text-sm text-gray-500">Includes taxes and fees</div>
+               <div className="text-sm text-gray-500">
+                 Includes taxes and fees
+                 {getUserLocation() === 'TR' && (
+                   <span className="text-xs text-gray-400 ml-2">
+                     (Converted from USD)
+                   </span>
+                 )}
+               </div>
              </div>
 
              {paymentDateError && (

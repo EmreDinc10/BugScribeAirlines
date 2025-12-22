@@ -214,10 +214,15 @@ export default function App() {
 
   // Auto-suggest when chat opens with payment date error
   useEffect(() => {
-    if (chatOpen && paymentDateError && chatMessages.length === 1) {
-      // Only add if it's the initial message (just opened)
-      const suggestion = "BugScribe Suggestion: Did you check the dates? The selected departure date may be in the past or invalid. Your booking details (date, route, passenger info) will be included in any bug report.";
-      addChatMessage('assistant', suggestion);
+    if (chatOpen && paymentDateError) {
+      // Check if suggestion already exists to avoid duplicates
+      const hasSuggestion = chatMessages.some(msg => 
+        msg.content.includes('Did you check the dates?')
+      );
+      if (!hasSuggestion) {
+        const suggestion = "BugScribe Suggestion: Did you check the dates? The selected departure date may be in the past or invalid. Your booking details (date, route, passenger info) will be included in any bug report.";
+        addChatMessage('assistant', suggestion);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatOpen, paymentDateError]);

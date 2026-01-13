@@ -48,6 +48,9 @@ export const useSkyDriftApp = () => {
   const [paymentDateError, setPaymentDateError] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [selectedFlightId, setSelectedFlightId] = useState(null);
+
+  // Track the date of the results separately from the form
+  const [resultsDate, setResultsDate] = useState('');
   
   const [formData, setFormData] = useState({
     from: 'Istanbul (IST)',
@@ -155,6 +158,7 @@ export const useSkyDriftApp = () => {
             console.log(`[SkyDrift] Flight ${flight.id}: $${flight.price} USD = ₺${priceTL} TL`);
           });
         }
+        setResultsDate(formData.date);
         setSearchResults(FLIGHTS);
       }
       
@@ -245,6 +249,7 @@ export const useSkyDriftApp = () => {
     setDateError('');
     setPaymentDateError('');
     setSearchResults([]);
+    setResultsDate('');
     setStep('search');
     console.clear();
   };
@@ -263,7 +268,45 @@ export const useSkyDriftApp = () => {
         default:
         break;
     }
-    };
+  };
+
+  const handleDateChange = (direction) => {
+    if (!formData.date) return;
+
+    // 1. Calculate the new date
+    const currentDate = new Date(formData.date);
+    if (direction === 'next') {
+      currentDate.setDate(currentDate.getDate() + 1);
+    } else {
+      currentDate.setDate(currentDate.getDate() - 1);
+    }
+    const newDateString = currentDate.toISOString().split('T')[0];
+
+    // 2. Validate
+    if (!validateDateRange(newDateString)) {
+      return; 
+    }
+
+    // 3. Update the UI Input immediately (The Controls Update)
+    setFormData(prev => ({ ...prev, date: newDateString }));
+    setLoading(true);
+
+    // 4. Log the INTENT
+    console.log(`[SkyDrift] User interaction: Date change requested -> ${newDateString}`);
+    console.log(`[SkyDrift] Re-fetching flights for parameters: { date: '${newDateString}', from: '${formData.from}', to: '${formData.to}' }`);
+
+    // 5. Simulate Network (The Bug)
+    setTimeout(() => {
+      console.log(`[SkyDrift] HTTP 200 OK. Flight data received.`);
+      console.log(`[SkyDrift] Data refresh complete. ${FLIGHTS.length} flights loaded.`);
+      console.warn(`[SkyDrift] Performance Optimization: Serving cached results for route ${formData.from}->${formData.to}. (Cache-Control: max-age=3600)`);
+      
+      // BUG: We intentionally DO NOT update 'resultsDate' here.
+      // We also set the exact same 'FLIGHTS' data.
+      setSearchResults(FLIGHTS);
+      setLoading(false);
+    }, 1500);
+  };
 
   return {
     state: {
@@ -272,6 +315,7 @@ export const useSkyDriftApp = () => {
       formData,
       searchResults,
       selectedFlightId,
+      resultsDate,
       errors: {
         date: dateError,
         card: cardNumberError,
@@ -288,7 +332,8 @@ export const useSkyDriftApp = () => {
       handleDetailsSubmit,
       handleFinalBooking,
       handleReset,
-      handleBack
+      handleBack,
+      handleDateChange
     }
   };
 };

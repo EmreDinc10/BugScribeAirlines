@@ -1,11 +1,11 @@
 import React from 'react';
-import { Plane, Calendar, CreditCard, User, AlertTriangle, ChevronRight, Search, MapPin, CheckCircle, ArrowLeft } from 'lucide-react';
+import { Plane, Calendar, CreditCard, User, AlertTriangle, ChevronRight, ChevronLeft, Search, MapPin, CheckCircle, ArrowLeft } from 'lucide-react';
 import { useSkyDriftApp, formatPrice, getUserLocation, MAX_BOOKING_DAYS, FLIGHTS } from './app_logic';
 
 export default function App() {
   // Extract state and actions from our Logic Hook
   const { state, actions } = useSkyDriftApp();
-  const { step, loading, formData, searchResults, selectedFlightId, errors } = state;
+  const { step, loading, formData, searchResults, selectedFlightId, resultsDate, errors } = state;
 
   // --- Components for Layout ---
   const Header = () => (
@@ -145,21 +145,56 @@ export default function App() {
         {/* STEP 2: RESULTS */}
         {step === 'results' && (
           <div className="space-y-4 animate-fade-in">
-              {/* Back Button Header */}
-              <div className="flex items-center mb-4">
+              {/* Top Navigation Row */}
+              <div className="flex justify-between items-center mb-6">
                 <button 
                   onClick={actions.handleBack}
-                  className="flex items-center text-gray-500 hover:text-sky-600 transition-colors"
+                  className="flex items-center text-gray-500 hover:text-sky-600 transition-colors text-sm font-medium"
                 >
-                  <ArrowLeft className="h-5 w-5 mr-2" />
-                  <span className="font-medium">Change Search</span>
+                  <ArrowLeft className="h-4 w-4 mr-1" />
+                  Change Search
                 </button>
+
+                {/* THE BUG TRIGGER: Date Controls */}
+                <div className="flex items-center bg-white border border-gray-200 rounded-lg shadow-sm p-1">
+                  <button 
+                    onClick={() => actions.handleDateChange('prev')}
+                    disabled={loading}
+                    className="p-2 hover:bg-gray-100 rounded-md text-gray-600 disabled:opacity-50"
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </button>
+                  <div className="px-4 text-sm font-bold text-gray-700 min-w-[120px] text-center">
+                     {formData.date ? new Date(formData.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Select Date'}
+                  </div>
+                  <button 
+                    onClick={() => actions.handleDateChange('next')}
+                    disabled={loading}
+                    className="p-2 hover:bg-gray-100 rounded-md text-gray-600 disabled:opacity-50"
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </button>
+                </div>
               </div>
 
-              <h2 className="text-xl font-bold text-gray-700">Select your outbound flight</h2>
-              <p className="text-sm text-gray-500 mb-4">
-                {formData.from} to {formData.to} • {formData.date ? new Date(formData.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
-              </p>
+              {/* Header Text */}
+              <div className="mb-6">
+                <h2 className="text-xl font-bold text-gray-700">Select your outbound flight</h2>
+                <p className="text-sm text-gray-500">
+                  {/* CHANGED FROM formData.date TO resultsDate */}
+                  {formData.from} to {formData.to} • {resultsDate ? new Date(resultsDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : ''}
+                </p>
+              </div>
+
+              {/* Loading State Overlay */}
+              {loading && (
+                <div className="fixed inset-0 bg-white/50 z-50 flex items-center justify-center backdrop-blur-sm">
+                   <div className="bg-white p-4 rounded-xl shadow-2xl flex items-center space-x-3">
+                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-sky-600"></div>
+                     <span className="font-semibold text-gray-700">Updating flights...</span>
+                   </div>
+                </div>
+              )}
               
               {searchResults.length === 0 ? (
                 <div className="bg-white p-12 rounded-xl shadow-sm border border-gray-200 text-center">
